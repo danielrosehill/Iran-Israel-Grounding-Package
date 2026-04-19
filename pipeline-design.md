@@ -104,7 +104,18 @@ Scheduling is external (cron, systemd timer, or LangGraph's `schedules`) — the
 
 ## Integration with forecast producer
 
+**Suggested pairing: [Geopol-Forecast-Council](https://github.com/danielrosehill/Geopol-Forecast-Council)** — the lean news-grounded panel forecaster. It already expects a timestamped SITREP as its grounding input and runs a five-model panel (GLM, DeepSeek, Gemini, Claude, Kimi) over it. This pipeline's `sitrep.md` slots in as the SITREP the Council otherwise builds ad-hoc from RSS + Perplexity Sonar + Tavily, replacing that step with a curated-whitelist equivalent that respects the repo's source policy.
+
 Downstream forecaster consumes `sitrep.md` + `analysis.json`. The forecaster treats the whitelist bounds as its evidence floor; anything it cites must trace back to an entry in `evidence[]`.
+
+Handoff contract:
+
+| Field | Source | Consumer use |
+|-------|--------|--------------|
+| `sitrep.md` | `sitrep` node | Council's grounding doc (replaces its built-in SITREP stage) |
+| `analysis.json` | `analyst` node | delta-vs-prior, recommended horizons |
+| `evidence[]` | `deep_research` node | citation floor for each panel prediction |
+| `last_report_ts` | state | Council's `--since` window bound |
 
 ## Open questions
 
