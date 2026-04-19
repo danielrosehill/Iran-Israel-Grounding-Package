@@ -102,20 +102,58 @@ Scheduling is external (cron, systemd timer, or LangGraph's `schedules`) — the
 
 `retrieval_window = min(max(now − last_report_ts, 1h) × m, 72h)` where `m ∈ [0.5, 2.0]` is set by triage's `reason` (e.g. kinetic-event keywords → 0.5 to keep the window tight and current; diplomatic-only → 1.5 for context).
 
-## Integration with forecast producer
+## Suggested pathways
 
-**Suggested pairing: [Geopol-Forecast-Council](https://github.com/danielrosehill/Geopol-Forecast-Council)** — the lean news-grounded panel forecaster. It already expects a timestamped SITREP as its grounding input and runs a five-model panel (GLM, DeepSeek, Gemini, Claude, Kimi) over it. This pipeline's `sitrep.md` slots in as the SITREP the Council otherwise builds ad-hoc from RSS + Perplexity Sonar + Tavily, replacing that step with a curated-whitelist equivalent that respects the repo's source policy.
+Two distinct usage shapes, sharing the same whitelist and SITREP template but differing in whether the triage/gate loop runs.
 
-Downstream forecaster consumes `sitrep.md` + `analysis.json`. The forecaster treats the whitelist bounds as its evidence floor; anything it cites must trace back to an entry in `evidence[]`.
+### Pathway A — Monitoring loop (full graph)
 
-Handoff contract:
+Long-running, scheduler-driven. Triage fires every 3h; deep research only escalates on a positive boolean. Output is a stream of dated SITREPs + heartbeats, suitable for continuous situational awareness or as a feed into a longer-horizon forecaster.
+
+Consumer example: a dashboard, an alerting channel, or [Geopol-Forecaster](https://github.com/danielrosehill/Geopol-Forecaster) (the actor-simulation pipeline) that wants a pre-digested evidence base rather than running its own ingestion.
+
+### Pathway B — One-shot retrieval (direct invocation)
+
+Skip triage, skip scheduling. Caller supplies `(frames, window)` and the graph runs `expand → deep_research → sitrep` once. Output is a single SITREP for immediate downstream consumption.
+
+Consumer example: **[Geopol-Forecast-Council](https://github.com/danielrosehill/Geopol-Forecast-Council)** — its panel run needs one fresh SITREP per invocation, not a continuous stream. The Council already treats SITREP construction as a preflight stage; Pathway B replaces its ad-hoc RSS + Sonar + Tavily fetch with a whitelist-bounded equivalent and hands back the same shape of document.
+
+### Handoff contract (both pathways)
 
 | Field | Source | Consumer use |
 |-------|--------|--------------|
-| `sitrep.md` | `sitrep` node | Council's grounding doc (replaces its built-in SITREP stage) |
-| `analysis.json` | `analyst` node | delta-vs-prior, recommended horizons |
-| `evidence[]` | `deep_research` node | citation floor for each panel prediction |
-| `last_report_ts` | state | Council's `--since` window bound |
+| `sitrep.md` | `sitrep` node | grounding doc for forecaster |
+| `analysis.json` | `analyst` node (A only) | delta-vs-prior, recommended horizons |
+| `evidence[]` | `deep_research` node | citation floor — anything cited must trace here |
+| `window_start` / `window_end` | state | explicit UTC bounds of the retrieval window |
+
+## Tool-stack minimalism
+
+Open question: is RSS + Tavily + Perplexity Sonar all three justified, or is it stack bloat?
+
+- **RSS** — cheap, deterministic, but latency varies per-publisher and most feeds only expose titles/summaries.
+- **Tavily** — good for breadth and for sources that don't publish RSS; supports domain-scoping so the whitelist can be enforced server-side.
+- **Sonar** — synthesised answers with citations; risks laundering non-whitelisted sources into the evidence chain unless citations are post-filtered.
+
+Minimum viable stack is probably **RSS (triage) + Tavily with domain-scope (deep research)**. Sonar earns its slot only if its synthesis quality materially beats what the deep-research node produces from raw Tavily hits — worth A/B-ing before committing.
+
+## The trailing-window problem
+
+The genuinely hard part. Most retrieval tools expose date filters at **day** granularity, not hour. For a 3h cadence this matters:
+
+- Tavily `days` parameter is integer-days; `published_date` in results is often missing or coarse.
+- Google/Bing date operators bucket at day level and frequently ignore `qdr:h` in practice.
+- RSS feeds give precise `pubDate` but only reflect what the publisher has emitted; quiet feeds produce nothing rather than "nothing new."
+- Sonar's recency control is opaque.
+
+Mitigations in order of reliability:
+
+1. **RSS-first with per-item timestamp filter** — trust `pubDate`, drop anything older than `window_start`. The only tier that gives true sub-day granularity for free.
+2. **Tavily with `days=ceil(window_hours/24)` then client-side filter** — over-fetch by a day, then filter on published_date where present; discard items lacking a timestamp unless corroborated by a timestamped source.
+3. **Direct HTTP fetch of known-high-signal pages** (e.g. ISW daily update, IDF/IRGC statements pages) with ETag/Last-Modified — for primaries where freshness is load-bearing.
+4. **Content-hash dedup across ticks** — a belt-and-braces check that catches anything the date filters missed; prevents yesterday's item re-surfacing as "new."
+
+Net: the pipeline should treat "hours" as an aspirational window that's enforced in the *filter* stage, not the *fetch* stage. Over-fetch, then prune by timestamp with RSS as the authority. An item without a reliable timestamp should not count toward the window even if it appears in results.
 
 ## Open questions
 
