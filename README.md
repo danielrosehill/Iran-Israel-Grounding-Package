@@ -181,3 +181,15 @@ Net: the pipeline should treat "hours" as an aspirational window that's enforced
 - Checkpoint store: SQLite locally vs Postgres for multi-host.
 - Dedup strategy across ticks (URL hash + content hash) to avoid re-surfacing yesterday's incident.
 - Whether triage should ever escalate cadence (e.g. flip to 1h polling on active kinetic day).
+
+## Runnable code
+
+- [`reference/`](./reference) — a minimal, generic runnable reference of the
+  triage → research → writer pattern. No publishing, no tagging, no database —
+  just prints a JSON SITREP to stdout. Start here if you want to adapt the
+  pattern to a different topic.
+- [SITREP_ISR/agent/](https://github.com/danielrosehill/SITREP_ISR/tree/main/agent)
+  — a concrete, opinionated adaptation of the pattern for
+  [sitrepisr.com](https://sitrepisr.com): extends the writer to emit CAMEO
+  QuadClass / Goldstein / magnitude scores and tags from a fixed catalog,
+  then POSTs to the site's admin endpoint.
